@@ -1,0 +1,16 @@
+{
+  "name": "jp.21csx.face-anim-optimizer",
+  "displayName": "(21)'s FaceAnim Optimizer",
+  "description": "まばたきアニメを改変済アバターに最適化するためのツール",
+  "version": "1.0.0",
+  "unity": "2022.3",
+  "unityRelease": "22f1",
+  "author": {
+    "name": "二十一世紀症候群",
+    "url": "https://l21l.booth.pm/"
+  },
+  "documentationUrl": "https://github.com/I21I/FaceAnimOptimizer",
+  "legacyFolders": {
+    "Assets/21CSXtools/FaceAnimOptimizer/Editor": ""
+  }
+}
