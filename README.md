@@ -1,6 +1,6 @@
 # FaceAnim Optimizer
 
-## AAO Merge Helper のインストール
+## インストール
 
  [インストールページ]()からVCCやALCOMに簡単に追加できます。
 
