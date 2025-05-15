@@ -2,7 +2,7 @@
 
 ## AAO Merge Helper のインストール
 
- [インストールページ](https://i21i.github.io/AAOMergeHelper/)からVCCやALCOMに簡単に追加できます。
+ [インストールページ]()からVCCやALCOMに簡単に追加できます。
 
 ## 概要
 FaceAnim Optimizerは、まばたきアニメを改変済アバターに最適化するためのUnityエディタ拡張ツールです。
