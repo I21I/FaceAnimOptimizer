@@ -31,10 +31,10 @@ FaceAnim Optimizerは、まばたきアニメを改変済アバターに最適�
 - Unity 2022.3.22f1
 - VRCSDK 3.8.1-beta.1
 
+## ライセンス
+MIT License
+
 ## お問い合わせ
 不具合やお問い合わせについては以下までお願いします：
 - [X / Twitter](https://x.com/pnpnrkgk)
 - [Booth](https://l21l.booth.pm/)
-
-## ライセンス
-MIT License
