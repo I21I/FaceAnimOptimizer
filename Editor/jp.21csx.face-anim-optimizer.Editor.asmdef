@@ -1,6 +1,6 @@
 {
     "name": "jp.21csx.face-anim-optimizer.Editor",
-    "rootNamespace": "",
+    "rootNamespace": "FaceAnimOptimizer",
     "references": [],
     "includePlatforms": [
         "Editor"
