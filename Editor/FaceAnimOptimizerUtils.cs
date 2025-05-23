@@ -176,5 +176,170 @@ namespace FaceAnimOptimizer
                 }
             }
         }
+
+        /// <summary>
+        /// 改良された左目BlendShape判定（正確性重視・VRChat対応）
+        /// </summary>
+        public static bool IsLeftEyeBlendShape(string blendShapeName)
+        {
+            if (string.IsNullOrEmpty(blendShapeName))
+                return false;
+            
+            // VRChatのリップシンク用は除外
+            if (blendShapeName.ToLower().StartsWith("vrc."))
+                return false;
+            
+            string lowerName = blendShapeName.ToLower();
+            
+            // 明確な左目パターンをチェック
+            if (lowerName.Contains("left"))
+                return true;
+            
+            // アンダーバー付きパターン（大文字小文字問わず）
+            if (lowerName.Contains("_l") || lowerName.Contains("l_"))
+                return true;
+            
+            // 末尾のL（大文字のみ - VRChatアバターの標準）
+            if (blendShapeName.EndsWith("L"))
+                return true;
+            
+            return false;
+        }
+
+        /// <summary>
+        /// 改良された右目BlendShape判定（正確性重視・VRChat対応）
+        /// </summary>
+        public static bool IsRightEyeBlendShape(string blendShapeName)
+        {
+            if (string.IsNullOrEmpty(blendShapeName))
+                return false;
+            
+            // VRChatのリップシンク用は除外
+            if (blendShapeName.ToLower().StartsWith("vrc."))
+                return false;
+            
+            string lowerName = blendShapeName.ToLower();
+            
+            // 明確な右目パターンをチェック
+            if (lowerName.Contains("right"))
+                return true;
+            
+            // アンダーバー付きパターン（大文字小文字問わず）
+            if (lowerName.Contains("_r") || lowerName.Contains("r_"))
+                return true;
+            
+            // 末尾のR（大文字のみ - VRChatアバターの標準）
+            if (blendShapeName.EndsWith("R"))
+                return true;
+            
+            return false;
+        }
+
+        /// <summary>
+        /// アニメーションクリップからBlendShape名を抽出（完全版）
+        /// </summary>
+        public static HashSet<string> ExtractBlendShapesFromAnimation(AnimationClip clip)
+        {
+            HashSet<string> blendShapes = new HashSet<string>();
+            
+            if (clip == null) return blendShapes;
+            
+            EditorCurveBinding[] bindings = AnimationUtility.GetCurveBindings(clip);
+            
+            foreach (var binding in bindings)
+            {
+                if (binding.type == typeof(SkinnedMeshRenderer) && 
+                    binding.propertyName.StartsWith("blendShape."))
+                {
+                    string blendShapeName = binding.propertyName.Substring("blendShape.".Length);
+                    
+                    // 空文字やnullチェック
+                    if (!string.IsNullOrEmpty(blendShapeName))
+                    {
+                        blendShapes.Add(blendShapeName);
+                    }
+                }
+            }
+            
+            return blendShapes;
+        }
+
+        /// <summary>
+        /// 複数のアニメーションクリップからBlendShape名を抽出
+        /// </summary>
+        public static HashSet<string> ExtractBlendShapesFromAnimations(List<AnimationClip> clips)
+        {
+            HashSet<string> allBlendShapes = new HashSet<string>();
+            
+            if (clips == null) return allBlendShapes;
+            
+            foreach (var clip in clips)
+            {
+                var blendShapes = ExtractBlendShapesFromAnimation(clip);
+                foreach (var bs in blendShapes)
+                {
+                    allBlendShapes.Add(bs);
+                }
+            }
+            
+            return allBlendShapes;
+        }
+
+        /// <summary>
+        /// L/RパターンのBlendShapeのみをフィルタリング（改良版）
+        /// </summary>
+        public static List<string> FilterBlendShapesByLRPattern(List<string> allBlendShapes)
+        {
+            List<string> filtered = new List<string>();
+            
+            if (allBlendShapes == null) return filtered;
+            
+            foreach (var shapeName in allBlendShapes)
+            {
+                if (IsLeftEyeBlendShape(shapeName) || IsRightEyeBlendShape(shapeName))
+                {
+                    filtered.Add(shapeName);
+                }
+            }
+            
+            return filtered;
+        }
+
+        /// <summary>
+        /// BlendShape名のデバッグ出力（開発用）
+        /// </summary>
+        public static void DebugBlendShapeNames(List<string> blendShapeNames, string context = "")
+        {
+            if (blendShapeNames == null || blendShapeNames.Count == 0)
+            {
+                Debug.Log($"[{context}] BlendShape名が空です");
+                return;
+            }
+            
+            Debug.Log($"[{context}] BlendShape一覧 ({blendShapeNames.Count}個):");
+            for (int i = 0; i < blendShapeNames.Count; i++)
+            {
+                string name = blendShapeNames[i];
+                bool isLeft = IsLeftEyeBlendShape(name);
+                bool isRight = IsRightEyeBlendShape(name);
+                string type = isLeft ? "[L]" : isRight ? "[R]" : "[?]";
+                Debug.Log($"  {i:D2}: {name} {type}");
+            }
+        }
+
+        /// <summary>
+        /// 表情アニメーションかどうかを判定
+        /// </summary>
+        public static bool IsExpressionAnimation(AnimationClip clip)
+        {
+            if (clip == null) return false;
+            
+            // BlendShapeを含むアニメーションかチェック
+            var blendShapes = ExtractBlendShapesFromAnimation(clip);
+            
+            // BlendShapeが含まれており、かつリップシンク用でない場合
+            return blendShapes.Count > 0 && 
+                   !blendShapes.Any(bs => bs.ToLower().StartsWith("vrc."));
+        }
     }
 }
