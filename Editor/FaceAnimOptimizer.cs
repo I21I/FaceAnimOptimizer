@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 
 namespace FaceAnimOptimizer
 {
@@ -16,28 +17,35 @@ namespace FaceAnimOptimizer
         private int currentTab = 0;
         private string[] tabNames = { "通常オプティマイズ", "片目アニメーション" };
         
-        // 調節対象のアニメーション（既存機能）
-        private List<AnimationClip> sourceAnimations = new List<AnimationClip>();
-        private bool[] animationSelected;
+        // ===== 通常オプティマイズタブ用データ =====
+        private List<AnimationClip> mainSourceAnimations = new List<AnimationClip>();
+        private bool[] mainAnimationSelected;
+        private List<string> mainTargetBlendShapes = new List<string>();
+        private Dictionary<string, BlendShapeInfo> mainBlendShapeInfos = new Dictionary<string, BlendShapeInfo>();
+        private bool mainHasShownBlendShapeInfo = false;
+        private string mainOutputAnimationPrefix = "";
         
-        // 表情アニメーション参照（BlendShape抽出用）
-        private List<AnimationClip> referenceAnimations = new List<AnimationClip>();
+        // ===== 片目アニメーションタブ用データ =====
+        private List<AnimationClip> eyeReferenceAnimations = new List<AnimationClip>();
+        private AnimationClip baseAnimation;
+        private List<string> eyeTargetBlendShapes = new List<string>();
+        private Dictionary<string, BlendShapeInfo> eyeBlendShapeInfos = new Dictionary<string, BlendShapeInfo>();
+        private bool eyeHasShownBlendShapeInfo = false;
+        private string eyeOutputAnimationPrefix = "";
         
+        // 共通データ
         private Vector2 scrollPosition;
-        private Vector2 animScrollPosition;
+        private Vector2 mainAnimScrollPosition;
+        private Vector2 eyeAnimScrollPosition;
         private Vector2 referenceScrollPosition;
         private Vector2 controllerScrollPosition;
         private Vector2 prefabScrollPosition;
-        private Vector2 blendShapeScrollPosition;
+        private Vector2 mainBlendShapeScrollPosition;
+        private Vector2 eyeBlendShapeScrollPosition;
         private Vector2 manualSelectionScrollPosition;
         
         private string baseOutputPath = "Assets/21CSXtools/FaceAnimOptimizer";
         private string outputFolderName = "";
-        private string outputAnimationPrefix = "";
-        
-        private List<string> targetBlendShapes = new List<string>();
-        private Dictionary<string, BlendShapeInfo> blendShapeInfos = new Dictionary<string, BlendShapeInfo>();
-        private bool hasShownBlendShapeInfo = false;
         
         private Language currentLanguage = Language.Japanese;
         
@@ -48,13 +56,10 @@ namespace FaceAnimOptimizer
         private GUIStyle dropAreaTextStyle;
         private GUIStyle thinSeparatorStyle;
         
-        // 手動選択用
+        // 手動選択用（共通）
         private List<string> availableBlendShapes = new List<string>();
         private Dictionary<string, bool> manualSelectionStates = new Dictionary<string, bool>();
         private bool showLRPatternOnly = false;
-        
-        // 片目アニメーション生成用
-        private AnimationClip baseAnimation;
         
         [System.Serializable]
         private class BlendShapeInfo
@@ -148,8 +153,10 @@ namespace FaceAnimOptimizer
                 
             if (previousMeshRenderer != targetMeshRenderer)
             {
-                hasShownBlendShapeInfo = false;
-                blendShapeInfos.Clear();
+                mainHasShownBlendShapeInfo = false;
+                mainBlendShapeInfos.Clear();
+                eyeHasShownBlendShapeInfo = false;
+                eyeBlendShapeInfos.Clear();
                 UpdateAvailableBlendShapes();
             }
             
@@ -194,35 +201,28 @@ namespace FaceAnimOptimizer
             DrawThinSeparator();
             EditorGUILayout.Space(3);
             
-            // 表情アニメーション参照エリア
-            DrawReferenceAnimationSection();
+            // 調節対象アニメーション（通常版）
+            DrawMainSourceAnimationSection();
             
             EditorGUILayout.Space(3);
             DrawThinSeparator();
             EditorGUILayout.Space(3);
             
-            // 調節対象アニメーション
-            DrawSourceAnimationSection();
-            
-            EditorGUILayout.Space(3);
-            DrawThinSeparator();
-            EditorGUILayout.Space(3);
-            
-            // BlendShape取得・設定
-            DrawBlendShapeSection();
+            // BlendShape取得・設定（通常版）
+            DrawMainBlendShapeSection();
             
             EditorGUILayout.Space(3);
             
-            // 出力設定
-            DrawOutputSettings();
+            // 出力設定（通常版）
+            DrawMainOutputSettings();
             
             EditorGUILayout.Space(3);
             
             // メイン機能ボタン
-            GUI.enabled = CanGenerateAnimations() && hasShownBlendShapeInfo;
+            GUI.enabled = CanGenerateMainAnimations() && mainHasShownBlendShapeInfo;
             if (GUILayout.Button(FaceAnimOptimizerLocalization.L("GenerateAnimations"), GUILayout.Height(30)))
             {
-                GenerateAdjustedAnimations();
+                GenerateMainAdjustedAnimations();
             }
             GUI.enabled = true;
         }
@@ -232,56 +232,34 @@ namespace FaceAnimOptimizer
             EditorGUILayout.LabelField("片目アニメーション生成", EditorStyles.boldLabel);
             EditorGUILayout.Space(5);
             
+            // 表情アニメーション参照エリア（片目版専用）
+            DrawEyeReferenceAnimationSection();
+            
+            EditorGUILayout.Space(3);
+            DrawThinSeparator();
+            EditorGUILayout.Space(3);
+            
             // ベースアニメーション選択
             EditorGUILayout.LabelField(FaceAnimOptimizerLocalization.L("BaseAnimation"), EditorStyles.boldLabel);
             baseAnimation = (AnimationClip)EditorGUILayout.ObjectField(
                 baseAnimation, typeof(AnimationClip), false, GUILayout.ExpandWidth(true));
             
             EditorGUILayout.Space(3);
+            DrawThinSeparator();
+            EditorGUILayout.Space(3);
             
-            // BlendShape設定が必要な旨を表示
-            if (!hasShownBlendShapeInfo || blendShapeInfos.Count == 0)
-            {
-                EditorGUILayout.HelpBox("先に「通常オプティマイズ」タブでBlendShapeを設定してください。", MessageType.Info);
-            }
-            else
-            {
-                EditorGUILayout.LabelField($"設定済みBlendShape: {blendShapeInfos.Count}個", EditorStyles.miniLabel);
-                
-                // L/Rパターンの確認表示
-                var leftShapes = targetBlendShapes.Where(FaceAnimOptimizerUtils.IsLeftEyeBlendShape).ToList();
-                var rightShapes = targetBlendShapes.Where(FaceAnimOptimizerUtils.IsRightEyeBlendShape).ToList();
-                
-                EditorGUILayout.LabelField($"左目用: {leftShapes.Count}個, 右目用: {rightShapes.Count}個", EditorStyles.miniLabel);
-                
-                // 詳細表示
-                if (leftShapes.Count > 0 || rightShapes.Count > 0)
-                {
-                    EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-                    if (leftShapes.Count > 0)
-                    {
-                        EditorGUILayout.LabelField("左目用BlendShape:", EditorStyles.boldLabel);
-                        foreach (var shape in leftShapes)
-                        {
-                            EditorGUILayout.LabelField($"  • {shape}");
-                        }
-                    }
-                    if (rightShapes.Count > 0)
-                    {
-                        EditorGUILayout.LabelField("右目用BlendShape:", EditorStyles.boldLabel);
-                        foreach (var shape in rightShapes)
-                        {
-                            EditorGUILayout.LabelField($"  • {shape}");
-                        }
-                    }
-                    EditorGUILayout.EndVertical();
-                }
-            }
+            // BlendShape取得・設定（片目版）
+            DrawEyeBlendShapeSection();
+            
+            EditorGUILayout.Space(3);
+            
+            // 出力設定（片目版）
+            DrawEyeOutputSettings();
             
             EditorGUILayout.Space(5);
             
             // 生成ボタン
-            GUI.enabled = baseAnimation != null && hasShownBlendShapeInfo && blendShapeInfos.Count > 0;
+            GUI.enabled = baseAnimation != null && eyeHasShownBlendShapeInfo && eyeBlendShapeInfos.Count > 0;
             
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button(FaceAnimOptimizerLocalization.L("GenerateLeftEye")))
@@ -305,14 +283,14 @@ namespace FaceAnimOptimizer
             // 説明
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.LabelField("使用方法:", EditorStyles.boldLabel);
-            EditorGUILayout.LabelField("1. 通常オプティマイズタブでBlendShapeを設定");
+            EditorGUILayout.LabelField("1. 上の表情アニメーション参照でBlendShapeを抽出");
             EditorGUILayout.LabelField("2. ベースとなるまばたきアニメーションを選択");
             EditorGUILayout.LabelField("3. 左目版・右目版・両目版のボタンを押す");
             EditorGUILayout.LabelField("4. 設定されたBlendShape値が最低値として保証される");
             EditorGUILayout.EndVertical();
         }
         
-        private void DrawReferenceAnimationSection()
+        private void DrawEyeReferenceAnimationSection()
         {
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.LabelField(FaceAnimOptimizerLocalization.L("ReferenceAnimations"), EditorStyles.boldLabel);
@@ -322,11 +300,11 @@ namespace FaceAnimOptimizer
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button("アバターから自動取得"))
             {
-                AutoDetectExpressionAnimations();
+                AutoDetectExpressionAnimationsForEye();
             }
             if (GUILayout.Button(FaceAnimOptimizerLocalization.L("Clear")))
             {
-                referenceAnimations.Clear();
+                eyeReferenceAnimations.Clear();
             }
             EditorGUILayout.EndHorizontal();
             
@@ -334,30 +312,30 @@ namespace FaceAnimOptimizer
             Rect dropArea = GUILayoutUtility.GetRect(0.0f, 30.0f, GUILayout.ExpandWidth(true));
             GUI.Box(dropArea, "", dropAreaStyle);
             EditorGUI.LabelField(dropArea, "表情アニメーションをここにドラッグ＆ドロップ", dropAreaTextStyle);
-            HandleReferenceAnimationDragAndDrop(dropArea);
+            HandleEyeReferenceAnimationDragAndDrop(dropArea);
             
             // 抽出ボタン
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button(FaceAnimOptimizerLocalization.L("ExtractBlendShapes")))
             {
-                ExtractBlendShapesFromReferenceAnimations();
+                ExtractBlendShapesFromEyeReferenceAnimations();
             }
             EditorGUILayout.EndHorizontal();
             
             // 参照アニメーション一覧
-            if (referenceAnimations.Count > 0)
+            if (eyeReferenceAnimations.Count > 0)
             {
                 referenceScrollPosition = EditorGUILayout.BeginScrollView(
                     referenceScrollPosition, GUILayout.Height(80), GUILayout.ExpandWidth(true));
                 
-                for (int i = 0; i < referenceAnimations.Count; i++)
+                for (int i = 0; i < eyeReferenceAnimations.Count; i++)
                 {
                     EditorGUILayout.BeginHorizontal();
-                    EditorGUILayout.ObjectField(referenceAnimations[i], typeof(AnimationClip), false);
+                    EditorGUILayout.ObjectField(eyeReferenceAnimations[i], typeof(AnimationClip), false);
                     
                     if (GUILayout.Button("×", GUILayout.Width(25)))
                     {
-                        referenceAnimations.RemoveAt(i);
+                        eyeReferenceAnimations.RemoveAt(i);
                         GUIUtility.ExitGUI();
                         break;
                     }
@@ -370,7 +348,8 @@ namespace FaceAnimOptimizer
             EditorGUILayout.EndVertical();
         }
         
-        private void AutoDetectExpressionAnimations()
+        // === 正確なVRCアバター表情アニメーション自動取得 ===
+        private void AutoDetectExpressionAnimationsForEye()
         {
             if (targetMeshRenderer == null)
             {
@@ -378,38 +357,54 @@ namespace FaceAnimOptimizer
                 return;
             }
             
-            // アバターオブジェクトを特定
-            GameObject avatarRoot = GetAvatarRoot(targetMeshRenderer);
+            Debug.Log("=== VRCアバター表情アニメーション自動取得開始 ===");
+            Debug.Log($"対象メッシュ: {targetMeshRenderer.name}");
+            
+            // 1. 対象メッシュからVRC Avatar Descriptorを検索
+            GameObject avatarRoot = FindVRCAvatarDescriptor(targetMeshRenderer);
             if (avatarRoot == null)
             {
-                EditorUtility.DisplayDialog("エラー", "アバターのルートオブジェクトが見つかりません。", "OK");
+                EditorUtility.DisplayDialog("エラー", "VRC Avatar Descriptorが見つかりません。", "OK");
                 return;
             }
             
-            List<AnimationClip> foundAnimations = new List<AnimationClip>();
+            Debug.Log($"VRC Avatar Descriptor発見: {avatarRoot.name}");
             
-            // 1. AnimatorControllerから表情アニメーションを検索
-            Animator animator = avatarRoot.GetComponent<Animator>();
-            if (animator != null && animator.runtimeAnimatorController != null)
+            // 2. Avatar DescriptorからFX Controllerを取得
+            AnimatorController fxController = GetFXController(avatarRoot);
+            if (fxController == null)
             {
-                var clips = FindGestureAnimations(animator.runtimeAnimatorController as AnimatorController);
-                foundAnimations.AddRange(clips);
+                EditorUtility.DisplayDialog("エラー", "FX Controllerが見つかりません。", "OK");
+                return;
             }
             
-            // 2. Facialフォルダから検索
-            var facialAnimations = FindFacialAnimations();
-            foundAnimations.AddRange(facialAnimations);
+            Debug.Log($"FX Controller発見: {fxController.name}");
             
-            // 重複を除去して追加
+            // 3. GestureLeft/GestureRightトランジションを持つアニメーションを検索
+            List<AnimationClip> gestureAnimations = FindGestureAnimations(fxController);
+            Debug.Log($"Gestureアニメーション発見: {gestureAnimations.Count}個");
+            
+            // 4. 対象メッシュのBlendShapeリストを取得
+            List<string> meshBlendShapes = GetMeshBlendShapeNames();
+            Debug.Log($"対象メッシュBlendShape数: {meshBlendShapes.Count}");
+            
+            // 5. L/R要素を含むBlendShapeが使用されているアニメーションをフィルタ
+            List<AnimationClip> validAnimations = FilterAnimationsWithLRBlendShapes(gestureAnimations, meshBlendShapes);
+            Debug.Log($"L/R BlendShape使用アニメーション: {validAnimations.Count}個");
+            
+            // 6. 結果をeyeReferenceAnimationsに追加
             int addedCount = 0;
-            foreach (var clip in foundAnimations)
+            foreach (var clip in validAnimations)
             {
-                if (clip != null && !referenceAnimations.Contains(clip))
+                if (clip != null && !eyeReferenceAnimations.Contains(clip))
                 {
-                    referenceAnimations.Add(clip);
+                    eyeReferenceAnimations.Add(clip);
                     addedCount++;
+                    Debug.Log($"追加アニメーション: {clip.name}");
                 }
             }
+            
+            Debug.Log($"=== 検出完了: 追加 {addedCount} 個 ===");
             
             if (addedCount > 0)
             {
@@ -417,122 +412,338 @@ namespace FaceAnimOptimizer
             }
             else
             {
-                EditorUtility.DisplayDialog("お知らせ", "表情アニメーションが見つかりませんでした。", "OK");
+                EditorUtility.DisplayDialog("お知らせ", "条件に合う表情アニメーションが見つかりませんでした。", "OK");
             }
         }
         
-        private GameObject GetAvatarRoot(SkinnedMeshRenderer renderer)
+        // 対象メッシュから上にたどってVRC Avatar Descriptorを見つける
+        private GameObject FindVRCAvatarDescriptor(SkinnedMeshRenderer renderer)
         {
             Transform current = renderer.transform;
             
-            // 上に向かってAvatarDescriptorを探す
             while (current != null)
             {
-                if (current.GetComponent<Component>()?.GetType().Name.Contains("VRCAvatarDescriptor") == true)
+                Debug.Log($"チェック中: {current.name}");
+                
+                // VRC Avatar Descriptorコンポーネントを検索
+                var components = current.GetComponents<Component>();
+                foreach (var comp in components)
                 {
-                    return current.gameObject;
-                }
-                current = current.parent;
-            }
-            
-            // 見つからない場合は、ルートオブジェクトを返す
-            current = renderer.transform;
-            while (current.parent != null)
-            {
-                current = current.parent;
-            }
-            
-            return current.gameObject;
-        }
-        
-        private List<AnimationClip> FindGestureAnimations(AnimatorController controller)
-        {
-            List<AnimationClip> clips = new List<AnimationClip>();
-            
-            if (controller == null) return clips;
-            
-            // FXレイヤーを探す
-            foreach (var layer in controller.layers)
-            {
-                if (layer.name.ToLower().Contains("fx") || 
-                    layer.name.ToLower().Contains("gesture") || 
-                    layer.name.ToLower().Contains("hand"))
-                {
-                    CollectGestureClips(layer.stateMachine, clips);
-                }
-            }
-            
-            return clips;
-        }
-        
-        private void CollectGestureClips(AnimatorStateMachine stateMachine, List<AnimationClip> clips)
-        {
-            foreach (var state in stateMachine.states)
-            {
-                if (state.state.motion is AnimationClip clip)
-                {
-                    // 表情関連のアニメーションを判定
-                    if (FaceAnimOptimizerUtils.IsExpressionAnimation(clip))
+                    if (comp != null && comp.GetType().Name == "VRCAvatarDescriptor")
                     {
-                        clips.Add(clip);
+                        Debug.Log($"VRC Avatar Descriptor発見: {current.name}");
+                        return current.gameObject;
                     }
                 }
-                else if (state.state.motion is BlendTree blendTree)
+                current = current.parent;
+            }
+            
+            Debug.Log("VRC Avatar Descriptorが見つかりませんでした");
+            return null;
+        }
+        
+        // Avatar DescriptorからFX Controllerを取得
+// Avatar DescriptorからFX Controllerを取得
+private AnimatorController GetFXController(GameObject avatarRoot)
+{
+    var avatarDescriptor = avatarRoot.GetComponent<Component>();
+    if (avatarDescriptor == null) return null;
+    
+    // リフレクションでPlayableLayersプロパティにアクセス
+    var descriptorType = avatarDescriptor.GetType();
+    var playableLayersField = descriptorType.GetField("baseAnimationLayers");
+    
+    if (playableLayersField != null)
+    {
+        var playableLayers = playableLayersField.GetValue(avatarDescriptor) as System.Array;
+        if (playableLayers != null)
+        {
+            foreach (var layer in playableLayers)
+            {
+                var layerType = layer.GetType();
+                var typeField = layerType.GetField("type");
+                var controllerField = layerType.GetField("animatorController");
+                
+                if (typeField != null && controllerField != null)
                 {
-                    CollectGestureClipsFromBlendTree(blendTree, clips);
+                    var layerTypeValue = typeField.GetValue(layer);
+                    
+                    // FXレイヤー（通常はタイプ4）をチェック
+                    if (layerTypeValue.ToString().Contains("FX") || layerTypeValue.ToString() == "4")
+                    {
+                        var runtimeController = controllerField.GetValue(layer) as RuntimeAnimatorController;
+                        if (runtimeController is AnimatorController animController)
+                        {
+                            Debug.Log($"FXレイヤー発見: {animController.name}");
+                            return animController;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // フォールバック: Animatorコンポーネントから取得
+    var animator = avatarRoot.GetComponent<Animator>();
+    if (animator != null && animator.runtimeAnimatorController is AnimatorController fallbackController)
+    {
+        Debug.Log($"フォールバック: Animatorから取得 {fallbackController.name}");
+        return fallbackController;
+    }
+    
+    return null;
+}
+        
+        // GestureLeft/GestureRightトランジションを持つアニメーションを検索
+        private List<AnimationClip> FindGestureAnimations(AnimatorController controller)
+        {
+            List<AnimationClip> animations = new List<AnimationClip>();
+            
+            foreach (var layer in controller.layers)
+            {
+                Debug.Log($"レイヤー検索: {layer.name}");
+                SearchStateMachineForGestureAnimations(layer.stateMachine, animations);
+            }
+            
+            return animations;
+        }
+        
+        private void SearchStateMachineForGestureAnimations(AnimatorStateMachine stateMachine, List<AnimationClip> animations)
+        {
+            // 各ステートをチェック
+            foreach (var childState in stateMachine.states)
+            {
+                var state = childState.state;
+                Debug.Log($"ステート検索: {state.name}");
+                
+                // このステートへのトランジションをチェック
+                bool hasGestureTransition = false;
+                
+                // 他のステートからこのステートへのトランジションをチェック
+                foreach (var otherChildState in stateMachine.states)
+                {
+                    foreach (var transition in otherChildState.state.transitions)
+                    {
+                        if (transition.destinationState == state)
+                        {
+                            // トランジションの条件をチェック
+                            foreach (var condition in transition.conditions)
+                            {
+                                string paramName = condition.parameter.ToLower();
+                                Debug.Log($"  トランジション条件: {condition.parameter}");
+                                
+                                if (paramName.Contains("gestureleft") || paramName.Contains("gestureright"))
+                                {
+                                    hasGestureTransition = true;
+                                    Debug.Log($"    Gestureトランジション発見!");
+                                    break;
+                                }
+                            }
+                            if (hasGestureTransition) break;
+                        }
+                    }
+                    if (hasGestureTransition) break;
+                }
+                
+                // AnyStateからのトランジションもチェック
+                foreach (var transition in stateMachine.anyStateTransitions)
+                {
+                    if (transition.destinationState == state)
+                    {
+                        foreach (var condition in transition.conditions)
+                        {
+                            string paramName = condition.parameter.ToLower();
+                            if (paramName.Contains("gestureleft") || paramName.Contains("gestureright"))
+                            {
+                                hasGestureTransition = true;
+                                Debug.Log($"AnyStateからGestureトランジション発見: {condition.parameter}");
+                                break;
+                            }
+                        }
+                    }
+                    if (hasGestureTransition) break;
+                }
+                
+                // Gestureトランジションがある場合、アニメーションを取得
+                if (hasGestureTransition)
+                {
+                    if (state.motion is AnimationClip clip)
+                    {
+                        animations.Add(clip);
+                        Debug.Log($"Gestureアニメーション追加: {clip.name}");
+                    }
+                    else if (state.motion is BlendTree blendTree)
+                    {
+                        CollectAnimationsFromBlendTree(blendTree, animations);
+                    }
                 }
             }
             
-            foreach (var subStateMachine in stateMachine.stateMachines)
+            // サブステートマシンも再帰的に検索
+            foreach (var childStateMachine in stateMachine.stateMachines)
             {
-                CollectGestureClips(subStateMachine.stateMachine, clips);
+                SearchStateMachineForGestureAnimations(childStateMachine.stateMachine, animations);
             }
         }
         
-        private void CollectGestureClipsFromBlendTree(BlendTree blendTree, List<AnimationClip> clips)
+        private void CollectAnimationsFromBlendTree(BlendTree blendTree, List<AnimationClip> animations)
         {
             foreach (var child in blendTree.children)
             {
                 if (child.motion is AnimationClip clip)
                 {
-                    if (FaceAnimOptimizerUtils.IsExpressionAnimation(clip))
-                    {
-                        clips.Add(clip);
-                    }
+                    animations.Add(clip);
+                    Debug.Log($"BlendTreeからアニメーション追加: {clip.name}");
                 }
                 else if (child.motion is BlendTree subTree)
                 {
-                    CollectGestureClipsFromBlendTree(subTree, clips);
+                    CollectAnimationsFromBlendTree(subTree, animations);
                 }
             }
         }
         
-        private List<AnimationClip> FindFacialAnimations()
+        // 対象メッシュのBlendShape名リストを取得
+        private List<string> GetMeshBlendShapeNames()
         {
-            List<AnimationClip> clips = new List<AnimationClip>();
+            List<string> blendShapeNames = new List<string>();
             
-            // プロジェクト内のすべてのアニメーションクリップを検索
-            string[] guids = AssetDatabase.FindAssets("t:AnimationClip");
-            
-            foreach (string guid in guids)
+            if (targetMeshRenderer != null && targetMeshRenderer.sharedMesh != null)
             {
-                string path = AssetDatabase.GUIDToAssetPath(guid);
-                
-                // Facialフォルダに含まれるかチェック
-                if (path.ToLower().Contains("facial"))
+                Mesh mesh = targetMeshRenderer.sharedMesh;
+                for (int i = 0; i < mesh.blendShapeCount; i++)
                 {
-                    AnimationClip clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(path);
-                    if (FaceAnimOptimizerUtils.IsExpressionAnimation(clip))
+                    blendShapeNames.Add(mesh.GetBlendShapeName(i));
+                }
+            }
+            
+            return blendShapeNames;
+        }
+        
+        // L/R要素を含むBlendShapeが使用されているアニメーションをフィルタ
+        private List<AnimationClip> FilterAnimationsWithLRBlendShapes(List<AnimationClip> animations, List<string> meshBlendShapes)
+        {
+            List<AnimationClip> validAnimations = new List<AnimationClip>();
+            
+            foreach (var animation in animations)
+            {
+                if (animation == null) continue;
+                
+                // アニメーションからBlendShapeを抽出
+                HashSet<string> animBlendShapes = FaceAnimOptimizerUtils.ExtractBlendShapesFromAnimation(animation);
+                
+                Debug.Log($"アニメーション '{animation.name}' のBlendShape: {animBlendShapes.Count}個");
+                
+                // 対象メッシュに存在し、L/R要素を含むBlendShapeがあるかチェック
+                bool hasValidLRBlendShape = false;
+                
+                foreach (string animBlendShape in animBlendShapes)
+                {
+                    // 対象メッシュに存在するかチェック
+                    if (meshBlendShapes.Contains(animBlendShape))
                     {
-                        clips.Add(clip);
+                        // L/R要素を含むかチェック
+                        if (FaceAnimOptimizerUtils.IsLeftEyeBlendShape(animBlendShape) || 
+                            FaceAnimOptimizerUtils.IsRightEyeBlendShape(animBlendShape))
+                        {
+                            hasValidLRBlendShape = true;
+                            Debug.Log($"  有効なL/R BlendShape発見: {animBlendShape}");
+                            break;
+                        }
+                    }
+                }
+                
+                if (hasValidLRBlendShape)
+                {
+                    validAnimations.Add(animation);
+                    Debug.Log($"有効なアニメーション: {animation.name}");
+                }
+            }
+            
+            return validAnimations;
+        }
+        
+        // BlendShape抽出メソッドの修正版（アニメーションからL/RのBlendShapeを抽出）
+        private void ExtractBlendShapesFromEyeReferenceAnimations()
+        {
+            if (eyeReferenceAnimations.Count == 0)
+            {
+                EditorUtility.DisplayDialog(
+                    FaceAnimOptimizerLocalization.L("Notice"),
+                    FaceAnimOptimizerLocalization.L("NoReferenceAnimations"),
+                    FaceAnimOptimizerLocalization.L("OK"));
+                return;
+            }
+            
+            if (targetMeshRenderer == null || targetMeshRenderer.sharedMesh == null)
+            {
+                EditorUtility.DisplayDialog(FaceAnimOptimizerLocalization.L("Error"), FaceAnimOptimizerLocalization.L("NoMeshSelected"), FaceAnimOptimizerLocalization.L("OK"));
+                return;
+            }
+            
+            Debug.Log("=== BlendShape抽出開始 ===");
+            
+            // 参照アニメーションからBlendShapeを抽出
+            HashSet<string> extractedBlendShapes = FaceAnimOptimizerUtils.ExtractBlendShapesFromAnimations(eyeReferenceAnimations);
+            Debug.Log($"アニメーションから抽出されたBlendShape: {extractedBlendShapes.Count}個");
+            
+            if (extractedBlendShapes.Count == 0)
+            {
+                EditorUtility.DisplayDialog(
+                    FaceAnimOptimizerLocalization.L("Notice"),
+                    FaceAnimOptimizerLocalization.L("NoBlendShapesInAnimations"),
+                    FaceAnimOptimizerLocalization.L("OK"));
+                return;
+            }
+            
+            eyeBlendShapeInfos.Clear();
+            eyeTargetBlendShapes.Clear();
+            
+            // 対象メッシュのBlendShapeリストを取得
+            List<string> meshBlendShapes = GetMeshBlendShapeNames();
+            
+            foreach (string shapeName in extractedBlendShapes)
+            {
+                // 対象メッシュに存在するかチェック
+                int shapeIndex = targetMeshRenderer.sharedMesh.GetBlendShapeIndex(shapeName);
+                if (shapeIndex >= 0)
+                {
+                    // L/R要素を含むかチェック
+                    if (FaceAnimOptimizerUtils.IsLeftEyeBlendShape(shapeName) || 
+                        FaceAnimOptimizerUtils.IsRightEyeBlendShape(shapeName))
+                    {
+                        // 現在の値を取得（0でも登録）
+                        float value = targetMeshRenderer.GetBlendShapeWeight(shapeIndex);
+                        
+                        eyeTargetBlendShapes.Add(shapeName);
+                        eyeBlendShapeInfos[shapeName] = new BlendShapeInfo { value = value, selected = true };
+                        
+                        Debug.Log($"L/R BlendShape登録: {shapeName} = {value:F1}%");
                     }
                 }
             }
             
-            return clips;
+            if (eyeTargetBlendShapes.Count > 0)
+            {
+                eyeHasShownBlendShapeInfo = true;
+                EditorUtility.DisplayDialog(
+                    FaceAnimOptimizerLocalization.L("Complete"),
+                    FaceAnimOptimizerLocalization.L("BlendShapesExtracted", eyeTargetBlendShapes.Count),
+                    FaceAnimOptimizerLocalization.L("OK"));
+            }
+            else
+            {
+                EditorUtility.DisplayDialog(
+                    FaceAnimOptimizerLocalization.L("Notice"),
+                    "L/R要素を含むBlendShapeが見つかりませんでした。",
+                    FaceAnimOptimizerLocalization.L("OK"));
+            }
+            
+            Debug.Log("=== BlendShape抽出完了 ===");
         }
         
-        private void DrawSourceAnimationSection()
+        // 以下は元のコードと同じメソッド群...
+        
+        private void DrawMainSourceAnimationSection()
         {
             EditorGUILayout.BeginHorizontal();
             GUILayout.Label(FaceAnimOptimizerLocalization.L("AddAnimation"), EditorStyles.boldLabel);
@@ -540,7 +751,7 @@ namespace FaceAnimOptimizer
             GUILayout.Space(20);
             if (GUILayout.Button(FaceAnimOptimizerLocalization.L("AddFromControllers"), GUILayout.Width(180)))
             {
-                AddAnimationsFromControllers();
+                AddMainAnimationsFromControllers();
             }
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
@@ -552,44 +763,44 @@ namespace FaceAnimOptimizer
             
             EditorGUI.LabelField(dropArea, FaceAnimOptimizerLocalization.L("DragDropAnimation"), dropAreaTextStyle);
             
-            HandleDragAndDrop(dropArea);
+            HandleMainDragAndDrop(dropArea);
             
-            if (sourceAnimations.Count > 0)
+            if (mainSourceAnimations.Count > 0)
             {
                 EditorGUILayout.Space(5);
                 
                 if (GUILayout.Button(FaceAnimOptimizerLocalization.L("DeleteAll")))
                 {
-                    sourceAnimations.Clear();
-                    animationSelected = null;
+                    mainSourceAnimations.Clear();
+                    mainAnimationSelected = null;
                 }
             }
             
-            DisplayAnimationsList();
+            DisplayMainAnimationsList();
         }
         
-        private void DrawBlendShapeSection()
+        private void DrawMainBlendShapeSection()
         {
             // BlendShape取得ボタン
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button(FaceAnimOptimizerLocalization.L("GetCurrentValues"), GUILayout.Height(30)))
             {
-                CaptureCurrentBlendShapeValues();
-                hasShownBlendShapeInfo = true;
+                CaptureMainCurrentBlendShapeValues();
+                mainHasShownBlendShapeInfo = true;
             }
             EditorGUILayout.EndHorizontal();
             
             EditorGUILayout.Space(3);
             
             // 手動選択UI
-            DrawManualSelectionUI();
+            DrawMainManualSelectionUI();
             
             // BlendShape値表示
-            if (targetMeshRenderer != null && hasShownBlendShapeInfo)
+            if (targetMeshRenderer != null && mainHasShownBlendShapeInfo)
             {
-                if (blendShapeInfos.Count > 0)
+                if (mainBlendShapeInfos.Count > 0)
                 {
-                    DisplayBlendShapeValues();
+                    DisplayMainBlendShapeValues();
                 }
                 else
                 {
@@ -598,7 +809,37 @@ namespace FaceAnimOptimizer
             }
         }
         
-        private void DrawManualSelectionUI()
+        private void DrawEyeBlendShapeSection()
+        {
+            // BlendShape取得ボタン
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button(FaceAnimOptimizerLocalization.L("GetCurrentValues"), GUILayout.Height(30)))
+            {
+                CaptureEyeCurrentBlendShapeValues();
+                eyeHasShownBlendShapeInfo = true;
+            }
+            EditorGUILayout.EndHorizontal();
+            
+            EditorGUILayout.Space(3);
+            
+            // 手動選択UI
+            DrawEyeManualSelectionUI();
+            
+            // BlendShape値表示
+            if (targetMeshRenderer != null && eyeHasShownBlendShapeInfo)
+            {
+                if (eyeBlendShapeInfos.Count > 0)
+                {
+                    DisplayEyeBlendShapeValues();
+                }
+                else
+                {
+                    EditorGUILayout.HelpBox(FaceAnimOptimizerLocalization.L("NoBlendShapesMessage"), MessageType.Info);
+                }
+            }
+        }
+        
+        private void DrawMainManualSelectionUI()
         {
             if (targetMeshRenderer == null || targetMeshRenderer.sharedMesh == null)
                 return;
@@ -616,7 +857,70 @@ namespace FaceAnimOptimizer
                 
                 if (GUILayout.Button(FaceAnimOptimizerLocalization.L("AddSelected")))
                 {
-                    AddSelectedBlendShapes();
+                    AddMainSelectedBlendShapes();
+                }
+                EditorGUILayout.EndHorizontal();
+                
+                if (availableBlendShapes.Count > 0)
+                {
+                    manualSelectionScrollPosition = EditorGUILayout.BeginScrollView(
+                        manualSelectionScrollPosition, GUILayout.Height(120), GUILayout.ExpandWidth(true));
+                    
+                    var displayList = showLRPatternOnly ? 
+                        FaceAnimOptimizerUtils.FilterBlendShapesByLRPattern(availableBlendShapes) : 
+                        availableBlendShapes;
+                    
+                    foreach (var shapeName in displayList)
+                    {
+                        EditorGUILayout.BeginHorizontal();
+                        
+                        bool currentState = manualSelectionStates.ContainsKey(shapeName) ? manualSelectionStates[shapeName] : false;
+                        bool newState = EditorGUILayout.Toggle(currentState, GUILayout.Width(20));
+                        manualSelectionStates[shapeName] = newState;
+                        
+                        EditorGUILayout.LabelField(shapeName);
+                        
+                        float currentValue = targetMeshRenderer.GetBlendShapeWeight(
+                            targetMeshRenderer.sharedMesh.GetBlendShapeIndex(shapeName));
+                        EditorGUILayout.LabelField($"{currentValue:F1}%", GUILayout.Width(50));
+                        
+                        // L/R判定結果表示
+                        string lrType = FaceAnimOptimizerUtils.IsLeftEyeBlendShape(shapeName) ? "[L]" : 
+                                       FaceAnimOptimizerUtils.IsRightEyeBlendShape(shapeName) ? "[R]" : "";
+                        if (!string.IsNullOrEmpty(lrType))
+                        {
+                            EditorGUILayout.LabelField(lrType, GUILayout.Width(25));
+                        }
+                        
+                        EditorGUILayout.EndHorizontal();
+                    }
+                    
+                    EditorGUILayout.EndScrollView();
+                }
+            }
+            
+            EditorGUILayout.EndVertical();
+        }
+        
+        private void DrawEyeManualSelectionUI()
+        {
+            if (targetMeshRenderer == null || targetMeshRenderer.sharedMesh == null)
+                return;
+                
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            bool eyeManualSelectionFoldout = EditorGUILayout.Foldout(manualSelectionFoldout, FaceAnimOptimizerLocalization.L("ManualBlendShapeSelection"), true);
+            
+            if (eyeManualSelectionFoldout)
+            {
+                EditorGUILayout.BeginHorizontal();
+                if (GUILayout.Button(showLRPatternOnly ? FaceAnimOptimizerLocalization.L("ShowAll") : FaceAnimOptimizerLocalization.L("ShowLROnly")))
+                {
+                    showLRPatternOnly = !showLRPatternOnly;
+                }
+                
+                if (GUILayout.Button(FaceAnimOptimizerLocalization.L("AddSelected")))
+                {
+                    AddEyeSelectedBlendShapes();
                 }
                 EditorGUILayout.EndHorizontal();
                 
@@ -678,10 +982,10 @@ namespace FaceAnimOptimizer
             }
         }
         
-        private void AddSelectedBlendShapes()
+        private void AddMainSelectedBlendShapes()
         {
-            blendShapeInfos.Clear();
-            targetBlendShapes.Clear();
+            mainBlendShapeInfos.Clear();
+            mainTargetBlendShapes.Clear();
             
             bool foundSelected = false;
             
@@ -695,8 +999,8 @@ namespace FaceAnimOptimizer
                     
                     if (value > 0.001f)
                     {
-                        targetBlendShapes.Add(shapeName);
-                        blendShapeInfos[shapeName] = new BlendShapeInfo { value = value, selected = true };
+                        mainTargetBlendShapes.Add(shapeName);
+                        mainBlendShapeInfos[shapeName] = new BlendShapeInfo { value = value, selected = true };
                         foundSelected = true;
                     }
                 }
@@ -704,10 +1008,10 @@ namespace FaceAnimOptimizer
             
             if (foundSelected)
             {
-                hasShownBlendShapeInfo = true;
+                mainHasShownBlendShapeInfo = true;
                 EditorUtility.DisplayDialog(
                     FaceAnimOptimizerLocalization.L("Complete"),
-                    FaceAnimOptimizerLocalization.L("BlendShapeCaptured", targetBlendShapes.Count),
+                    FaceAnimOptimizerLocalization.L("BlendShapeCaptured", mainTargetBlendShapes.Count),
                     FaceAnimOptimizerLocalization.L("OK"));
             }
             else
@@ -719,7 +1023,48 @@ namespace FaceAnimOptimizer
             }
         }
         
-        private void HandleReferenceAnimationDragAndDrop(Rect dropArea)
+        private void AddEyeSelectedBlendShapes()
+        {
+            eyeBlendShapeInfos.Clear();
+            eyeTargetBlendShapes.Clear();
+            
+            bool foundSelected = false;
+            
+            foreach (var kvp in manualSelectionStates)
+            {
+                if (kvp.Value) // 選択されている
+                {
+                    string shapeName = kvp.Key;
+                    float value = targetMeshRenderer.GetBlendShapeWeight(
+                        targetMeshRenderer.sharedMesh.GetBlendShapeIndex(shapeName));
+                    
+                    if (value > 0.001f)
+                    {
+                        eyeTargetBlendShapes.Add(shapeName);
+                        eyeBlendShapeInfos[shapeName] = new BlendShapeInfo { value = value, selected = true };
+                        foundSelected = true;
+                    }
+                }
+            }
+            
+            if (foundSelected)
+            {
+                eyeHasShownBlendShapeInfo = true;
+                EditorUtility.DisplayDialog(
+                    FaceAnimOptimizerLocalization.L("Complete"),
+                    FaceAnimOptimizerLocalization.L("BlendShapeCaptured", eyeTargetBlendShapes.Count),
+                    FaceAnimOptimizerLocalization.L("OK"));
+            }
+            else
+            {
+                EditorUtility.DisplayDialog(
+                    FaceAnimOptimizerLocalization.L("Notice"),
+                    FaceAnimOptimizerLocalization.L("NoActiveBlendShapes"),
+                    FaceAnimOptimizerLocalization.L("OK"));
+            }
+        }
+        
+        private void HandleEyeReferenceAnimationDragAndDrop(Rect dropArea)
         {
             Event currentEvent = Event.current;
             
@@ -741,9 +1086,9 @@ namespace FaceAnimOptimizer
                     {
                         if (draggedObject is AnimationClip clip)
                         {
-                            if (!referenceAnimations.Contains(clip))
+                            if (!eyeReferenceAnimations.Contains(clip))
                             {
-                                referenceAnimations.Add(clip);
+                                eyeReferenceAnimations.Add(clip);
                             }
                         }
                     }
@@ -751,73 +1096,6 @@ namespace FaceAnimOptimizer
                     Repaint();
                     currentEvent.Use();
                     break;
-            }
-        }
-        
-        private void ExtractBlendShapesFromReferenceAnimations()
-        {
-            if (referenceAnimations.Count == 0)
-            {
-                EditorUtility.DisplayDialog(
-                    FaceAnimOptimizerLocalization.L("Notice"),
-                    FaceAnimOptimizerLocalization.L("NoReferenceAnimations"),
-                    FaceAnimOptimizerLocalization.L("OK"));
-                return;
-            }
-            
-            if (targetMeshRenderer == null || targetMeshRenderer.sharedMesh == null)
-            {
-                EditorUtility.DisplayDialog(FaceAnimOptimizerLocalization.L("Error"), FaceAnimOptimizerLocalization.L("NoMeshSelected"), FaceAnimOptimizerLocalization.L("OK"));
-                return;
-            }
-            
-            // 参照アニメーションからBlendShapeを抽出
-            HashSet<string> extractedBlendShapes = FaceAnimOptimizerUtils.ExtractBlendShapesFromAnimations(referenceAnimations);
-            
-            if (extractedBlendShapes.Count == 0)
-            {
-                EditorUtility.DisplayDialog(
-                    FaceAnimOptimizerLocalization.L("Notice"),
-                    FaceAnimOptimizerLocalization.L("NoBlendShapesInAnimations"),
-                    FaceAnimOptimizerLocalization.L("OK"));
-                return;
-            }
-            
-            blendShapeInfos.Clear();
-            targetBlendShapes.Clear();
-            
-            bool foundActiveBlendShapes = false;
-            
-            foreach (string shapeName in extractedBlendShapes)
-            {
-                int shapeIndex = targetMeshRenderer.sharedMesh.GetBlendShapeIndex(shapeName);
-                if (shapeIndex >= 0)
-                {
-                    float value = targetMeshRenderer.GetBlendShapeWeight(shapeIndex);
-                    
-                    if (value > 0.001f)
-                    {
-                        targetBlendShapes.Add(shapeName);
-                        blendShapeInfos[shapeName] = new BlendShapeInfo { value = value, selected = true };
-                        foundActiveBlendShapes = true;
-                    }
-                }
-            }
-            
-            if (foundActiveBlendShapes)
-            {
-                hasShownBlendShapeInfo = true;
-                EditorUtility.DisplayDialog(
-                    FaceAnimOptimizerLocalization.L("Complete"),
-                    FaceAnimOptimizerLocalization.L("BlendShapesExtracted", targetBlendShapes.Count),
-                    FaceAnimOptimizerLocalization.L("OK"));
-            }
-            else
-            {
-                EditorUtility.DisplayDialog(
-                    FaceAnimOptimizerLocalization.L("Notice"),
-                    FaceAnimOptimizerLocalization.L("NoActiveBlendShapes"),
-                    FaceAnimOptimizerLocalization.L("OK"));
             }
         }
         
@@ -845,7 +1123,7 @@ namespace FaceAnimOptimizer
                 case EyeType.Both: suffix = "_BothEyes"; break;
             }
             
-            string newClipName = baseAnimation.name + suffix;
+            string newClipName = eyeOutputAnimationPrefix + baseAnimation.name + suffix;
             AnimationClip newClip = new AnimationClip();
             newClip.name = newClipName;
             newClip.frameRate = baseAnimation.frameRate;
@@ -890,21 +1168,21 @@ namespace FaceAnimOptimizer
                     bool shouldApplyBlendShape = false;
                     BlendShapeInfo info = null;
                     
-                    // 対象のBlendShapeかどうかを判定
+                    // 対象のBlendShapeかどうかを判定（片目版のデータを使用）
                     switch (eyeType)
                     {
                         case EyeType.LeftOnly:
                             shouldApplyBlendShape = FaceAnimOptimizerUtils.IsLeftEyeBlendShape(blendShapeName) &&
-                                                  blendShapeInfos.TryGetValue(blendShapeName, out info) && info.selected;
+                                                  eyeBlendShapeInfos.TryGetValue(blendShapeName, out info) && info.selected;
                             break;
                         case EyeType.RightOnly:
                             shouldApplyBlendShape = FaceAnimOptimizerUtils.IsRightEyeBlendShape(blendShapeName) &&
-                                                  blendShapeInfos.TryGetValue(blendShapeName, out info) && info.selected;
+                                                  eyeBlendShapeInfos.TryGetValue(blendShapeName, out info) && info.selected;
                             break;
                         case EyeType.Both:
                             shouldApplyBlendShape = (FaceAnimOptimizerUtils.IsLeftEyeBlendShape(blendShapeName) || 
                                                    FaceAnimOptimizerUtils.IsRightEyeBlendShape(blendShapeName)) &&
-                                                  blendShapeInfos.TryGetValue(blendShapeName, out info) && info.selected;
+                                                  eyeBlendShapeInfos.TryGetValue(blendShapeName, out info) && info.selected;
                             break;
                     }
                     
@@ -1079,7 +1357,7 @@ namespace FaceAnimOptimizer
             EditorGUILayout.EndScrollView();
         }
         
-        private void DrawOutputSettings()
+        private void DrawMainOutputSettings()
         {
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.LabelField(FaceAnimOptimizerLocalization.L("OutputSettings"), EditorStyles.boldLabel);
@@ -1091,13 +1369,31 @@ namespace FaceAnimOptimizer
             
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField(FaceAnimOptimizerLocalization.L("OutputPrefix"), GUILayout.Width(100));
-            outputAnimationPrefix = EditorGUILayout.TextField(outputAnimationPrefix);
+            mainOutputAnimationPrefix = EditorGUILayout.TextField(mainOutputAnimationPrefix);
             EditorGUILayout.EndHorizontal();
             
             EditorGUILayout.EndVertical();
         }
         
-        private void HandleDragAndDrop(Rect dropArea)
+        private void DrawEyeOutputSettings()
+        {
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField(FaceAnimOptimizerLocalization.L("OutputSettings"), EditorStyles.boldLabel);
+            
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(FaceAnimOptimizerLocalization.L("OutputFolder"), GUILayout.Width(100));
+            EditorGUILayout.LabelField(baseOutputPath + "/EyeAnim[日付]");
+            EditorGUILayout.EndHorizontal();
+            
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(FaceAnimOptimizerLocalization.L("OutputPrefix"), GUILayout.Width(100));
+            eyeOutputAnimationPrefix = EditorGUILayout.TextField(eyeOutputAnimationPrefix);
+            EditorGUILayout.EndHorizontal();
+            
+            EditorGUILayout.EndVertical();
+        }
+        
+        private void HandleMainDragAndDrop(Rect dropArea)
         {
             Event currentEvent = Event.current;
             
@@ -1123,7 +1419,7 @@ namespace FaceAnimOptimizer
                     {
                         if (draggedObject is AnimationClip)
                         {
-                            AddAnimationClip(draggedObject as AnimationClip);
+                            AddMainAnimationClip(draggedObject as AnimationClip);
                         }
                         else if (draggedObject is AnimatorController)
                         {
@@ -1147,25 +1443,23 @@ namespace FaceAnimOptimizer
             }
         }
         
-        private void AddAnimationClip(AnimationClip clip)
+        private void AddMainAnimationClip(AnimationClip clip)
         {
-            if (clip != null && !sourceAnimations.Contains(clip))
+            if (clip != null && !mainSourceAnimations.Contains(clip))
             {
-                sourceAnimations.Add(clip);
+                mainSourceAnimations.Add(clip);
                 
-                sourceAnimations.Sort((a, b) => string.Compare(a.name, b.name, StringComparison.Ordinal));
+                mainSourceAnimations.Sort((a, b) => string.Compare(a.name, b.name, StringComparison.Ordinal));
                 
-                int newIndex = sourceAnimations.IndexOf(clip);
+                bool[] newArray = new bool[mainSourceAnimations.Count];
                 
-                bool[] newArray = new bool[sourceAnimations.Count];
-                
-                if (animationSelected != null)
+                if (mainAnimationSelected != null)
                 {
-                    for (int i = 0; i < animationSelected.Length; i++)
+                    for (int i = 0; i < mainAnimationSelected.Length; i++)
                     {
-                        if (i < sourceAnimations.Count)
+                        if (i < mainSourceAnimations.Count)
                         {
-                            newArray[i] = animationSelected[i];
+                            newArray[i] = mainAnimationSelected[i];
                         }
                     }
                 }
@@ -1175,13 +1469,13 @@ namespace FaceAnimOptimizer
                     newArray[i] = true;
                 }
                 
-                animationSelected = newArray;
+                mainAnimationSelected = newArray;
             }
         }
         
-        private void DisplayAnimationsList()
+        private void DisplayMainAnimationsList()
         {
-            if (sourceAnimations.Count == 0)
+            if (mainSourceAnimations.Count == 0)
             {
                 return;
             }
@@ -1189,46 +1483,46 @@ namespace FaceAnimOptimizer
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button(FaceAnimOptimizerLocalization.L("SelectAll")))
             {
-                for (int i = 0; i < animationSelected.Length; i++)
-                    animationSelected[i] = true;
+                for (int i = 0; i < mainAnimationSelected.Length; i++)
+                    mainAnimationSelected[i] = true;
             }
             if (GUILayout.Button(FaceAnimOptimizerLocalization.L("UnselectAll")))
             {
-                for (int i = 0; i < animationSelected.Length; i++)
-                    animationSelected[i] = false;
+                for (int i = 0; i < mainAnimationSelected.Length; i++)
+                    mainAnimationSelected[i] = false;
             }
             EditorGUILayout.EndHorizontal();
             
-            float listHeight = Mathf.Min(120, sourceAnimations.Count * 20 + 10);
-            animScrollPosition = EditorGUILayout.BeginScrollView(animScrollPosition, GUILayout.Height(listHeight));
+            float listHeight = Mathf.Min(120, mainSourceAnimations.Count * 20 + 10);
+            mainAnimScrollPosition = EditorGUILayout.BeginScrollView(mainAnimScrollPosition, GUILayout.Height(listHeight));
             
-            for (int i = 0; i < sourceAnimations.Count; i++)
+            for (int i = 0; i < mainSourceAnimations.Count; i++)
             {
                 EditorGUILayout.BeginHorizontal();
                 
-                if (animationSelected != null && i < animationSelected.Length)
+                if (mainAnimationSelected != null && i < mainAnimationSelected.Length)
                 {
-                    animationSelected[i] = EditorGUILayout.Toggle(animationSelected[i], GUILayout.Width(20));
+                    mainAnimationSelected[i] = EditorGUILayout.Toggle(mainAnimationSelected[i], GUILayout.Width(20));
                 }
                 
-                EditorGUILayout.ObjectField(sourceAnimations[i], typeof(AnimationClip), false);
+                EditorGUILayout.ObjectField(mainSourceAnimations[i], typeof(AnimationClip), false);
                 
                 if (GUILayout.Button("×", GUILayout.Width(25)))
                 {
-                    sourceAnimations.RemoveAt(i);
+                    mainSourceAnimations.RemoveAt(i);
                     
-                    if (sourceAnimations.Count > 0 && animationSelected != null)
+                    if (mainSourceAnimations.Count > 0 && mainAnimationSelected != null)
                     {
-                        bool[] newArray = new bool[sourceAnimations.Count];
-                        for (int j = 0; j < i && j < animationSelected.Length; j++)
-                            newArray[j] = animationSelected[j];
-                        for (int j = i; j < sourceAnimations.Count && j+1 < animationSelected.Length; j++)
-                            newArray[j] = animationSelected[j + 1];
-                        animationSelected = newArray;
+                        bool[] newArray = new bool[mainSourceAnimations.Count];
+                        for (int j = 0; j < i && j < mainAnimationSelected.Length; j++)
+                            newArray[j] = mainAnimationSelected[j];
+                        for (int j = i; j < mainSourceAnimations.Count && j+1 < mainAnimationSelected.Length; j++)
+                            newArray[j] = mainAnimationSelected[j + 1];
+                        mainAnimationSelected = newArray;
                     }
                     else
                     {
-                        animationSelected = null;
+                        mainAnimationSelected = null;
                     }
                     
                     GUIUtility.ExitGUI();
@@ -1241,7 +1535,7 @@ namespace FaceAnimOptimizer
             EditorGUILayout.EndScrollView();
         }
         
-        private void AddAnimationsFromControllers()
+        private void AddMainAnimationsFromControllers()
         {
             if (targetAnimatorControllers.Count == 0)
             {
@@ -1264,34 +1558,34 @@ namespace FaceAnimOptimizer
                 
                 foreach (AnimationClip clip in clips)
                 {
-                    if (clip != null && !sourceAnimations.Contains(clip) && uniqueClips.Add(clip))
+                    if (clip != null && !mainSourceAnimations.Contains(clip) && uniqueClips.Add(clip))
                     {
-                        sourceAnimations.Add(clip);
+                        mainSourceAnimations.Add(clip);
                         addedCount++;
                     }
                 }
             }
             
-            sourceAnimations.Sort((a, b) => string.Compare(a.name, b.name, StringComparison.Ordinal));
+            mainSourceAnimations.Sort((a, b) => string.Compare(a.name, b.name, StringComparison.Ordinal));
             
-            bool[] newArray = new bool[sourceAnimations.Count];
-            if (animationSelected != null)
+            bool[] newArray = new bool[mainSourceAnimations.Count];
+            if (mainAnimationSelected != null)
             {
-                for (int i = 0; i < Mathf.Min(animationSelected.Length, sourceAnimations.Count); i++)
+                for (int i = 0; i < Mathf.Min(mainAnimationSelected.Length, mainSourceAnimations.Count); i++)
                 {
-                    newArray[i] = animationSelected[i];
+                    newArray[i] = mainAnimationSelected[i];
                 }
             }
             
-            for (int i = 0; i < sourceAnimations.Count; i++)
+            for (int i = 0; i < mainSourceAnimations.Count; i++)
             {
-                if (i >= animationSelected?.Length || animationSelected == null)
+                if (i >= mainAnimationSelected?.Length || mainAnimationSelected == null)
                 {
                     newArray[i] = true;
                 }
             }
             
-            animationSelected = newArray;
+            mainAnimationSelected = newArray;
             
             if (addedCount > 0)
             {
@@ -1311,7 +1605,7 @@ namespace FaceAnimOptimizer
             }
         }
         
-        private void CaptureCurrentBlendShapeValues()
+        private void CaptureMainCurrentBlendShapeValues()
         {
             if (targetMeshRenderer == null || targetMeshRenderer.sharedMesh == null)
             {
@@ -1319,8 +1613,8 @@ namespace FaceAnimOptimizer
                 return;
             }
             
-            blendShapeInfos.Clear();
-            targetBlendShapes.Clear();
+            mainBlendShapeInfos.Clear();
+            mainTargetBlendShapes.Clear();
             
             Mesh mesh = targetMeshRenderer.sharedMesh;
             bool foundActiveBlendShapes = false;
@@ -1332,8 +1626,8 @@ namespace FaceAnimOptimizer
                 
                 if (value > 0.001f)
                 {
-                    targetBlendShapes.Add(name);
-                    blendShapeInfos[name] = new BlendShapeInfo { value = value, selected = true };
+                    mainTargetBlendShapes.Add(name);
+                    mainBlendShapeInfos[name] = new BlendShapeInfo { value = value, selected = true };
                     foundActiveBlendShapes = true;
                 }
             }
@@ -1356,14 +1650,64 @@ namespace FaceAnimOptimizer
             else
             {
                 EditorUtility.DisplayDialog(FaceAnimOptimizerLocalization.L("Complete"), 
-                    FaceAnimOptimizerLocalization.L("BlendShapeCaptured", targetBlendShapes.Count), 
+                    FaceAnimOptimizerLocalization.L("BlendShapeCaptured", mainTargetBlendShapes.Count), 
                     FaceAnimOptimizerLocalization.L("OK"));
             }
         }
         
-        private void DisplayBlendShapeValues()
+        private void CaptureEyeCurrentBlendShapeValues()
         {
-            if (targetBlendShapes.Count == 0)
+            if (targetMeshRenderer == null || targetMeshRenderer.sharedMesh == null)
+            {
+                EditorUtility.DisplayDialog(FaceAnimOptimizerLocalization.L("Error"), FaceAnimOptimizerLocalization.L("NoMeshSelected"), FaceAnimOptimizerLocalization.L("OK"));
+                return;
+            }
+            
+            eyeBlendShapeInfos.Clear();
+            eyeTargetBlendShapes.Clear();
+            
+            Mesh mesh = targetMeshRenderer.sharedMesh;
+            bool foundActiveBlendShapes = false;
+            
+            for (int i = 0; i < mesh.blendShapeCount; i++)
+            {
+                string name = mesh.GetBlendShapeName(i);
+                float value = targetMeshRenderer.GetBlendShapeWeight(i);
+                
+                if (value > 0.001f)
+                {
+                    eyeTargetBlendShapes.Add(name);
+                    eyeBlendShapeInfos[name] = new BlendShapeInfo { value = value, selected = true };
+                    foundActiveBlendShapes = true;
+                }
+            }
+            
+            if (!foundActiveBlendShapes)
+            {
+                if (mesh.blendShapeCount > 0)
+                {
+                    EditorUtility.DisplayDialog(FaceAnimOptimizerLocalization.L("Notice"), 
+                        FaceAnimOptimizerLocalization.L("NoActiveBlendShapes"), 
+                        FaceAnimOptimizerLocalization.L("OK"));
+                }
+                else
+                {
+                    EditorUtility.DisplayDialog(FaceAnimOptimizerLocalization.L("Notice"), 
+                        FaceAnimOptimizerLocalization.L("NoBlendShapes"), 
+                        FaceAnimOptimizerLocalization.L("OK"));
+                }
+            }
+            else
+            {
+                EditorUtility.DisplayDialog(FaceAnimOptimizerLocalization.L("Complete"), 
+                    FaceAnimOptimizerLocalization.L("BlendShapeCaptured", eyeTargetBlendShapes.Count), 
+                    FaceAnimOptimizerLocalization.L("OK"));
+            }
+        }
+        
+        private void DisplayMainBlendShapeValues()
+        {
+            if (mainTargetBlendShapes.Count == 0)
             {
                 EditorGUILayout.HelpBox(FaceAnimOptimizerLocalization.L("NoBlendShapesMessage"), MessageType.Info);
                 return;
@@ -1371,63 +1715,49 @@ namespace FaceAnimOptimizer
 
             EditorGUILayout.LabelField(FaceAnimOptimizerLocalization.L("CapturedBlendShapes"), EditorStyles.boldLabel);
             
-            // デバッグ情報表示
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField($"総数: {targetBlendShapes.Count}個", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField($"総数: {mainTargetBlendShapes.Count}個", EditorStyles.miniLabel);
             if (GUILayout.Button("デバッグ出力", GUILayout.Width(80)))
             {
-                FaceAnimOptimizerUtils.DebugBlendShapeNames(targetBlendShapes, "DisplayBlendShapeValues");
-                
-                // BlendShapeInfoの内容も確認
-                Debug.Log("=== BlendShapeInfo辞書の内容 ===");
-                foreach (var kvp in blendShapeInfos)
-                {
-                    Debug.Log($"Key: '{kvp.Key}' Value: {kvp.Value.value:F1}% Selected: {kvp.Value.selected}");
-                }
+                FaceAnimOptimizerUtils.DebugBlendShapeNames(mainTargetBlendShapes, "Main_DisplayBlendShapeValues");
             }
             EditorGUILayout.EndHorizontal();
             
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button(FaceAnimOptimizerLocalization.L("SelectAll")))
             {
-                foreach (var name in targetBlendShapes)
+                foreach (var name in mainTargetBlendShapes)
                 {
-                    if (blendShapeInfos.ContainsKey(name))
+                    if (mainBlendShapeInfos.ContainsKey(name))
                     {
-                        var info = blendShapeInfos[name];
+                        var info = mainBlendShapeInfos[name];
                         info.selected = true;
-                        blendShapeInfos[name] = info;
+                        mainBlendShapeInfos[name] = info;
                     }
                 }
             }
             if (GUILayout.Button(FaceAnimOptimizerLocalization.L("UnselectAll")))
             {
-                foreach (var name in targetBlendShapes)
+                foreach (var name in mainTargetBlendShapes)
                 {
-                    if (blendShapeInfos.ContainsKey(name))
+                    if (mainBlendShapeInfos.ContainsKey(name))
                     {
-                        var info = blendShapeInfos[name];
+                        var info = mainBlendShapeInfos[name];
                         info.selected = false;
-                        blendShapeInfos[name] = info;
+                        mainBlendShapeInfos[name] = info;
                     }
                 }
             }
             EditorGUILayout.EndHorizontal();
             
-            blendShapeScrollPosition = EditorGUILayout.BeginScrollView(
-                blendShapeScrollPosition, GUILayout.Height(150), GUILayout.ExpandWidth(true));
+            mainBlendShapeScrollPosition = EditorGUILayout.BeginScrollView(
+                mainBlendShapeScrollPosition, GUILayout.Height(150), GUILayout.ExpandWidth(true));
                 
-            EditorGUILayout.BeginHorizontal();
-            
-            // 左列
-            EditorGUILayout.BeginVertical(GUILayout.Width(Screen.width / 2 - 15));
-            int halfCount = targetBlendShapes.Count / 2 + targetBlendShapes.Count % 2;
-            for (int i = 0; i < halfCount; i++)
+            foreach (var name in mainTargetBlendShapes)
             {
-                string name = targetBlendShapes[i];
-                if (blendShapeInfos.ContainsKey(name))
+                if (mainBlendShapeInfos.ContainsKey(name))
                 {
-                    var info = blendShapeInfos[name];
+                    var info = mainBlendShapeInfos[name];
                     
                     EditorGUILayout.BeginHorizontal();
                     
@@ -1435,10 +1765,9 @@ namespace FaceAnimOptimizer
                     if (newSelected != info.selected)
                     {
                         info.selected = newSelected;
-                        blendShapeInfos[name] = info;
+                        mainBlendShapeInfos[name] = info;
                     }
                     
-                    // BlendShape名を完全表示（省略しない）
                     EditorGUILayout.LabelField(name, GUILayout.MinWidth(100));
                     EditorGUILayout.LabelField($"{info.value:F1}%", GUILayout.Width(50));
                     
@@ -1453,56 +1782,103 @@ namespace FaceAnimOptimizer
                     EditorGUILayout.EndHorizontal();
                 }
             }
-            EditorGUILayout.EndVertical();
-            
-            // 右列
-            EditorGUILayout.BeginVertical(GUILayout.Width(Screen.width / 2 - 15));
-            for (int i = halfCount; i < targetBlendShapes.Count; i++)
-            {
-                string name = targetBlendShapes[i];
-                if (blendShapeInfos.ContainsKey(name))
-                {
-                    var info = blendShapeInfos[name];
-                    
-                    EditorGUILayout.BeginHorizontal();
-                    
-                    bool newSelected = EditorGUILayout.Toggle(info.selected, GUILayout.Width(20));
-                    if (newSelected != info.selected)
-                    {
-                        info.selected = newSelected;
-                        blendShapeInfos[name] = info;
-                    }
-                    
-                    // BlendShape名を完全表示（省略しない）
-                    EditorGUILayout.LabelField(name, GUILayout.MinWidth(100));
-                    EditorGUILayout.LabelField($"{info.value:F1}%", GUILayout.Width(50));
-                    
-                    // L/R判定結果も表示
-                    string lrType = FaceAnimOptimizerUtils.IsLeftEyeBlendShape(name) ? "[L]" : 
-                                   FaceAnimOptimizerUtils.IsRightEyeBlendShape(name) ? "[R]" : "";
-                    if (!string.IsNullOrEmpty(lrType))
-                    {
-                        EditorGUILayout.LabelField(lrType, GUILayout.Width(25));
-                    }
-                    
-                    EditorGUILayout.EndHorizontal();
-                }
-            }
-            EditorGUILayout.EndVertical();
-            
-            EditorGUILayout.EndHorizontal();
             
             EditorGUILayout.EndScrollView();
         }
         
-        private bool CanGenerateAnimations()
+        private void DisplayEyeBlendShapeValues()
         {
-            return targetMeshRenderer != null && 
-                sourceAnimations.Count > 0 && 
-                animationSelected != null;
+            if (eyeTargetBlendShapes.Count == 0)
+            {
+                EditorGUILayout.HelpBox(FaceAnimOptimizerLocalization.L("NoBlendShapesMessage"), MessageType.Info);
+                return;
+            }
+
+            EditorGUILayout.LabelField(FaceAnimOptimizerLocalization.L("CapturedBlendShapes"), EditorStyles.boldLabel);
+            
+            // L/Rパターンの確認表示
+            var leftShapes = eyeTargetBlendShapes.Where(FaceAnimOptimizerUtils.IsLeftEyeBlendShape).ToList();
+            var rightShapes = eyeTargetBlendShapes.Where(FaceAnimOptimizerUtils.IsRightEyeBlendShape).ToList();
+            
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField($"総数: {eyeTargetBlendShapes.Count}個 (左目用: {leftShapes.Count}個, 右目用: {rightShapes.Count}個)", EditorStyles.miniLabel);
+            if (GUILayout.Button("デバッグ出力", GUILayout.Width(80)))
+            {
+                FaceAnimOptimizerUtils.DebugBlendShapeNames(eyeTargetBlendShapes, "Eye_DisplayBlendShapeValues");
+            }
+            EditorGUILayout.EndHorizontal();
+            
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button(FaceAnimOptimizerLocalization.L("SelectAll")))
+            {
+                foreach (var name in eyeTargetBlendShapes)
+                {
+                    if (eyeBlendShapeInfos.ContainsKey(name))
+                    {
+                        var info = eyeBlendShapeInfos[name];
+                        info.selected = true;
+                        eyeBlendShapeInfos[name] = info;
+                    }
+                }
+            }
+            if (GUILayout.Button(FaceAnimOptimizerLocalization.L("UnselectAll")))
+            {
+                foreach (var name in eyeTargetBlendShapes)
+                {
+                    if (eyeBlendShapeInfos.ContainsKey(name))
+                    {
+                        var info = eyeBlendShapeInfos[name];
+                        info.selected = false;
+                        eyeBlendShapeInfos[name] = info;
+                    }
+                }
+            }
+            EditorGUILayout.EndHorizontal();
+            
+            eyeBlendShapeScrollPosition = EditorGUILayout.BeginScrollView(
+                eyeBlendShapeScrollPosition, GUILayout.Height(150), GUILayout.ExpandWidth(true));
+                
+            foreach (var name in eyeTargetBlendShapes)
+            {
+                if (eyeBlendShapeInfos.ContainsKey(name))
+                {
+                    var info = eyeBlendShapeInfos[name];
+                    
+                    EditorGUILayout.BeginHorizontal();
+                    
+                    bool newSelected = EditorGUILayout.Toggle(info.selected, GUILayout.Width(20));
+                    if (newSelected != info.selected)
+                    {
+                        info.selected = newSelected;
+                        eyeBlendShapeInfos[name] = info;
+                    }
+                    
+                    EditorGUILayout.LabelField(name, GUILayout.MinWidth(100));
+                    EditorGUILayout.LabelField($"{info.value:F1}%", GUILayout.Width(50));
+                    
+                    // L/R判定結果も表示
+                    string lrType = FaceAnimOptimizerUtils.IsLeftEyeBlendShape(name) ? "[L]" : 
+                                   FaceAnimOptimizerUtils.IsRightEyeBlendShape(name) ? "[R]" : "";
+                    if (!string.IsNullOrEmpty(lrType))
+                    {
+                        EditorGUILayout.LabelField(lrType, GUILayout.Width(25));
+                    }
+                    
+                    EditorGUILayout.EndHorizontal();
+                }
+            }
+            
+            EditorGUILayout.EndScrollView();
         }
         
-        private void GenerateAdjustedAnimations()
+        private bool CanGenerateMainAnimations()
+        {
+            return targetMeshRenderer != null && 
+                mainSourceAnimations.Count > 0 && 
+                mainAnimationSelected != null;
+        }
+        
+        private void GenerateMainAdjustedAnimations()
         {
             outputFolderName = "Anim" + DateTime.Now.ToString("yyMMddHHmmss");
             string outputFolder = baseOutputPath + "/" + outputFolderName;
@@ -1514,23 +1890,23 @@ namespace FaceAnimOptimizer
             Dictionary<GameObject, GameObject> prefabReplacementMap = new Dictionary<GameObject, GameObject>();
             int processedCount = 0;
             
-            for (int i = 0; i < sourceAnimations.Count; i++)
+            for (int i = 0; i < mainSourceAnimations.Count; i++)
             {
-                if (animationSelected == null || i >= animationSelected.Length || !animationSelected[i])
+                if (mainAnimationSelected == null || i >= mainAnimationSelected.Length || !mainAnimationSelected[i])
                     continue;
                     
-                AnimationClip sourceClip = sourceAnimations[i];
+                AnimationClip sourceClip = mainSourceAnimations[i];
                 if (sourceClip == null)
                     continue;
                     
                 string newClipName;
-                if (string.IsNullOrEmpty(outputAnimationPrefix))
+                if (string.IsNullOrEmpty(mainOutputAnimationPrefix))
                 {
                     newClipName = "FAO_" + sourceClip.name;
                 }
                 else
                 {
-                    newClipName = outputAnimationPrefix + sourceClip.name;
+                    newClipName = mainOutputAnimationPrefix + sourceClip.name;
                 }
                 
                 AnimationClip newClip = new AnimationClip();
@@ -1552,7 +1928,7 @@ namespace FaceAnimOptimizer
                     stopTime = sourceSettings.stopTime
                 };
                 
-                CreateAdjustedCurves(sourceClip, newClip);
+                CreateMainAdjustedCurves(sourceClip, newClip);
                 
                 AnimationUtility.SetAnimationClipSettings(newClip, newSettings);
                 
@@ -1593,6 +1969,7 @@ namespace FaceAnimOptimizer
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
             
+            // AnimatorController処理は同じ
             if (targetAnimatorControllers.Count > 0 && animReplacementMap.Count > 0)
             {
                 foreach (AnimatorController controller in targetAnimatorControllers)
@@ -1641,6 +2018,7 @@ namespace FaceAnimOptimizer
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
             
+            // Prefab処理も同じ
             if (targetPrefabs.Count > 0 && controllerReplacementMap.Count > 0)
             {
                 foreach (GameObject prefab in targetPrefabs)
@@ -1692,7 +2070,7 @@ namespace FaceAnimOptimizer
             
             EditorUtility.DisplayDialog(FaceAnimOptimizerLocalization.L("Success"), resultMessage, FaceAnimOptimizerLocalization.L("OK"));
             
-            EditorUtility.FocusProjectWindow();
+EditorUtility.FocusProjectWindow();
             UnityEngine.Object folderAsset = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(outputFolder);
             if (folderAsset != null)
             {
@@ -1700,6 +2078,61 @@ namespace FaceAnimOptimizer
             }
         }
         
+        private void CreateMainAdjustedCurves(AnimationClip sourceClip, AnimationClip newClip)
+        {
+            EditorCurveBinding[] curveBindings = AnimationUtility.GetCurveBindings(sourceClip);
+            
+            foreach (EditorCurveBinding binding in curveBindings)
+            {
+                if (binding.type == typeof(SkinnedMeshRenderer) && binding.propertyName.StartsWith("blendShape."))
+                {
+                    string blendShapeName = binding.propertyName.Substring("blendShape.".Length);
+                    
+                    BlendShapeInfo info;
+                    if (mainBlendShapeInfos.TryGetValue(blendShapeName, out info) && info.selected)
+                    {
+                        AnimationCurve sourceCurve = AnimationUtility.GetEditorCurve(sourceClip, binding);
+                        AnimationCurve adjustedCurve = CreateAdjustedCurve(sourceCurve, info.value);
+                        AnimationUtility.SetEditorCurve(newClip, binding, adjustedCurve);
+                    }
+                    else
+                    {
+                        AnimationCurve sourceCurve = AnimationUtility.GetEditorCurve(sourceClip, binding);
+                        AnimationUtility.SetEditorCurve(newClip, binding, sourceCurve);
+                    }
+                }
+                else
+                {
+                    AnimationCurve sourceCurve = AnimationUtility.GetEditorCurve(sourceClip, binding);
+                    AnimationUtility.SetEditorCurve(newClip, binding, sourceCurve);
+                }
+            }
+        }
+
+        private AnimationCurve CreateAdjustedCurve(AnimationCurve sourceCurve, float minimumValue)
+        {
+            AnimationCurve adjustedCurve = new AnimationCurve();
+            
+            foreach (Keyframe key in sourceCurve.keys)
+            {
+                // 元の値と最低保証値の最大値を取る（従来の動作）
+                float newValue = Mathf.Max(key.value, minimumValue);
+                
+                Keyframe newKey = new Keyframe(
+                    key.time, 
+                    newValue, 
+                    key.inTangent, 
+                    key.outTangent, 
+                    key.inWeight, 
+                    key.outWeight
+                );
+                adjustedCurve.AddKey(newKey);
+            }
+            
+            return adjustedCurve;
+        }
+        
+        // 共通のメソッド（Controller・Prefab操作）
         private GameObject CreatePrefabVariant(GameObject sourcePrefab, string outputFolder, Dictionary<AnimatorController, AnimatorController> controllerMap)
         {
             if (sourcePrefab == null)
@@ -1864,60 +2297,6 @@ namespace FaceAnimOptimizer
             {
                 PrefabUtility.UnloadPrefabContents(prefabRoot);
             }
-        }
-        
-        private void CreateAdjustedCurves(AnimationClip sourceClip, AnimationClip newClip)
-        {
-            EditorCurveBinding[] curveBindings = AnimationUtility.GetCurveBindings(sourceClip);
-            
-            foreach (EditorCurveBinding binding in curveBindings)
-            {
-                if (binding.type == typeof(SkinnedMeshRenderer) && binding.propertyName.StartsWith("blendShape."))
-                {
-                    string blendShapeName = binding.propertyName.Substring("blendShape.".Length);
-                    
-                    BlendShapeInfo info;
-                    if (blendShapeInfos.TryGetValue(blendShapeName, out info) && info.selected)
-                    {
-                        AnimationCurve sourceCurve = AnimationUtility.GetEditorCurve(sourceClip, binding);
-                        AnimationCurve adjustedCurve = CreateAdjustedCurve(sourceCurve, info.value);
-                        AnimationUtility.SetEditorCurve(newClip, binding, adjustedCurve);
-                    }
-                    else
-                    {
-                        AnimationCurve sourceCurve = AnimationUtility.GetEditorCurve(sourceClip, binding);
-                        AnimationUtility.SetEditorCurve(newClip, binding, sourceCurve);
-                    }
-                }
-                else
-                {
-                    AnimationCurve sourceCurve = AnimationUtility.GetEditorCurve(sourceClip, binding);
-                    AnimationUtility.SetEditorCurve(newClip, binding, sourceCurve);
-                }
-            }
-        }
-
-        private AnimationCurve CreateAdjustedCurve(AnimationCurve sourceCurve, float minimumValue)
-        {
-            AnimationCurve adjustedCurve = new AnimationCurve();
-            
-            foreach (Keyframe key in sourceCurve.keys)
-            {
-                // 元の値と最低保証値の最大値を取る（従来の動作）
-                float newValue = Mathf.Max(key.value, minimumValue);
-                
-                Keyframe newKey = new Keyframe(
-                    key.time, 
-                    newValue, 
-                    key.inTangent, 
-                    key.outTangent, 
-                    key.inWeight, 
-                    key.outWeight
-                );
-                adjustedCurve.AddKey(newKey);
-            }
-            
-            return adjustedCurve;
         }
         
         private bool ReplaceAnimationsInController(AnimatorController controller, Dictionary<AnimationClip, AnimationClip> replacementMap)
