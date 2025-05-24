@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace FaceAnimOptimizer
 {
@@ -178,7 +179,7 @@ namespace FaceAnimOptimizer
         }
 
         /// <summary>
-        /// 改良された左目BlendShape判定（正確性重視・VRChat対応）
+        /// 厳密な左目BlendShape判定（正確性重視・false positive削減）
         /// </summary>
         public static bool IsLeftEyeBlendShape(string blendShapeName)
         {
@@ -189,25 +190,26 @@ namespace FaceAnimOptimizer
             if (blendShapeName.ToLower().StartsWith("vrc."))
                 return false;
             
-            string lowerName = blendShapeName.ToLower();
+            // 厳密なパターンマッチング
+            string pattern = @"(?i)^.*((^|_)left($|_)|(^|_)l($|_)|L$).*$";
             
-            // 明確な左目パターンをチェック
-            if (lowerName.Contains("left"))
+            // より厳密な判定：明確な左目関連の単語またはパターンのみを対象
+            if (Regex.IsMatch(blendShapeName, @"(?i)\bleft\b"))
                 return true;
             
-            // アンダーバー付きパターン（大文字小文字問わず）
-            if (lowerName.Contains("_l") || lowerName.Contains("l_"))
+            // 明確なアンダーバー区切りでのL
+            if (Regex.IsMatch(blendShapeName, @"(^|_)[Ll]($|_)"))
                 return true;
             
-            // 末尾のL（大文字のみ - VRChatアバターの標準）
-            if (blendShapeName.EndsWith("L"))
+            // 末尾のL（大文字のみ、前が英数字でない場合）
+            if (Regex.IsMatch(blendShapeName, @"[^a-zA-Z]L$|^L$"))
                 return true;
             
             return false;
         }
 
         /// <summary>
-        /// 改良された右目BlendShape判定（正確性重視・VRChat対応）
+        /// 厳密な右目BlendShape判定（正確性重視・false positive削減）
         /// </summary>
         public static bool IsRightEyeBlendShape(string blendShapeName)
         {
@@ -218,18 +220,16 @@ namespace FaceAnimOptimizer
             if (blendShapeName.ToLower().StartsWith("vrc."))
                 return false;
             
-            string lowerName = blendShapeName.ToLower();
-            
-            // 明確な右目パターンをチェック
-            if (lowerName.Contains("right"))
+            // より厳密な判定：明確な右目関連の単語またはパターンのみを対象
+            if (Regex.IsMatch(blendShapeName, @"(?i)\bright\b"))
                 return true;
             
-            // アンダーバー付きパターン（大文字小文字問わず）
-            if (lowerName.Contains("_r") || lowerName.Contains("r_"))
+            // 明確なアンダーバー区切りでのR
+            if (Regex.IsMatch(blendShapeName, @"(^|_)[Rr]($|_)"))
                 return true;
             
-            // 末尾のR（大文字のみ - VRChatアバターの標準）
-            if (blendShapeName.EndsWith("R"))
+            // 末尾のR（大文字のみ、前が英数字でない場合）
+            if (Regex.IsMatch(blendShapeName, @"[^a-zA-Z]R$|^R$"))
                 return true;
             
             return false;
