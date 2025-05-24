@@ -85,39 +85,41 @@ namespace FaceAnimOptimizer
             AddLocalization("NoControllerSelected", "AnimatorControllerが選択されていません", "No AnimatorController selected");
             AddLocalization("NoPrefabSelected", "Prefabが選択されていません", "No Prefab selected");
 
-// 表情アニメーション参照
-AddLocalization("ReferenceAnimations", "表情アニメーション参照", "Reference Expression Animations");
-AddLocalization("ReferenceAnimationsDesc", "BlendShape抽出用の表情アニメーション", "Expression animations for BlendShape extraction");
-AddLocalization("ExtractBlendShapes", "BlendShape抽出", "Extract BlendShapes");
-AddLocalization("AutoDetectFromAvatar", "アバターから自動取得", "Auto-Detect from Avatar");
+            // 表情アニメーション参照
+            AddLocalization("ReferenceAnimations", "表情アニメーション参照", "Reference Expression Animations");
+            AddLocalization("ReferenceAnimationsDesc", "BlendShape抽出用の表情アニメーション", "Expression animations for BlendShape extraction");
+            AddLocalization("ExtractBlendShapes", "BlendShape抽出", "Extract BlendShapes");
+            AddLocalization("AutoDetectFromAvatar", "アバターから自動取得", "Auto-Detect from Avatar");
 
-// 片目アニメーション生成
-AddLocalization("GenerateEyeAnimations", "片目アニメーション生成", "Generate Eye Animations");
-AddLocalization("BaseAnimation", "ベースアニメーション", "Base Animation");
-AddLocalization("GenerateLeftEye", "左目版生成", "Generate Left Eye");
-AddLocalization("GenerateRightEye", "右目版生成", "Generate Right Eye");
-AddLocalization("GenerateBothEyes", "両目版生成", "Generate Both Eyes");
+            // 片目アニメーション生成
+            AddLocalization("GenerateEyeAnimations", "片目アニメーション生成", "Generate Eye Animations");
+            AddLocalization("BaseAnimation", "ベースアニメーション", "Base Animation");
+            AddLocalization("GenerateLeftEye", "左目版生成", "Generate Left Eye");
+            AddLocalization("GenerateRightEye", "右目版生成", "Generate Right Eye");
+            AddLocalization("GenerateBothEyes", "両目版生成", "Generate Both Eyes");
 
-// 手動選択
-AddLocalization("ManualBlendShapeSelection", "BlendShape手動選択", "Manual BlendShape Selection");
-AddLocalization("ShowLROnly", "L/Rパターンのみ", "L/R Pattern Only");
-AddLocalization("AddSelected", "選択したものを追加", "Add Selected");
+            // 手動選択
+            AddLocalization("ManualBlendShapeSelection", "BlendShape手動選択", "Manual BlendShape Selection");
+            AddLocalization("ShowLROnly", "L/Rパターンのみ", "L/R Pattern Only");
+            AddLocalization("ShowAll", "すべて表示", "Show All");
+            AddLocalization("AddSelected", "選択したものを追加", "Add Selected");
 
-// 自動取得関連メッセージ
-AddLocalization("AvatarNotFound", "アバターのルートオブジェクトが見つかりません。", "Avatar root object not found.");
-AddLocalization("NoExpressionAnimationsFound", "表情アニメーションが見つかりませんでした。", "No expression animations found.");
-AddLocalization("ExpressionAnimationsDetected", "{0}個の表情アニメーションを検出しました。", "Detected {0} expression animations.");
+            // 自動取得関連メッセージ
+            AddLocalization("AvatarNotFound", "アバターのルートオブジェクトが見つかりません。", "Avatar root object not found.");
+            AddLocalization("NoExpressionAnimationsFound", "表情アニメーションが見つかりませんでした。", "No expression animations found.");
+            AddLocalization("ExpressionAnimationsDetected", "{0}個の表情アニメーションを検出しました。", "Detected {0} expression animations.");
 
-// その他のメッセージ
-AddLocalization("BlendShapesExtracted", "{0}個のBlendShapeを抽出しました", "Extracted {0} BlendShapes");
-AddLocalization("NoReferenceAnimations", "表情アニメーションが設定されていません", "No reference animations are set");
-AddLocalization("EyeAnimationGenerated", "{0}の片目アニメーションを生成しました", "Generated eye animation for {0}");
-AddLocalization("SelectBaseAnimationFirst", "ベースアニメーションを選択してください", "Please select a base animation");
-AddLocalization("SetBlendShapesFirst", "先に「通常オプティマイズ」タブでBlendShapeを設定してください。", "Please set BlendShapes in the 'Main Optimize' tab first.");
+            // その他のメッセージ
+            AddLocalization("BlendShapesExtracted", "{0}個のBlendShapeを抽出しました", "Extracted {0} BlendShapes");
+            AddLocalization("NoReferenceAnimations", "表情アニメーションが設定されていません", "No reference animations are set");
+            AddLocalization("NoBlendShapesInAnimations", "表情アニメーションにBlendShapeが含まれていませんでした", "No BlendShapes found in expression animations");
+            AddLocalization("EyeAnimationGenerated", "{0}の片目アニメーションを生成しました", "Generated eye animation for {0}");
+            AddLocalization("SelectBaseAnimationFirst", "ベースアニメーションを選択してください", "Please select a base animation");
+            AddLocalization("SetBlendShapesFirst", "先に「通常オプティマイズ」タブでBlendShapeを設定してください。", "Please set BlendShapes in the 'Main Optimize' tab first.");
 
-// タブ名
-AddLocalization("MainOptimizeTab", "通常オプティマイズ", "Main Optimize");
-AddLocalization("EyeAnimationTab", "片目アニメーション", "Eye Animation");
+            // タブ名
+            AddLocalization("MainOptimizeTab", "通常オプティマイズ", "Main Optimize");
+            AddLocalization("EyeAnimationTab", "片目アニメーション", "Eye Animation");
         }
 
         private static void AddLocalization(string key, string japanese, string english)
